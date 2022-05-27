@@ -42,6 +42,10 @@ type ZapConfig struct {
 }
 
 func InitZlog(cfgFile string) {
+	if Zlogger != nil && Sugar != nil {
+		return
+	}
+
 	var zlogConfig = &ZlogConfig{}
 	if len(cfgFile) > 0 {
 		zlogConfig = __initConfig(cfgFile)
@@ -74,14 +78,11 @@ func InitZlog(cfgFile string) {
 	zap.RegisterEncoder("textEncoder", getTextEncoder)
 
 	encoderConfig := zapcore.EncoderConfig{
-		MessageKey:     zapConfig.MessageKey,
-		LevelKey:       zapConfig.LevelKey,
-		TimeKey:        zapConfig.TimeKey,
-		NameKey:        zapConfig.NameKey,
-		CallerKey:      zapConfig.CallerKey,
-		StacktraceKey:  zapConfig.StacktraceKey,
+		MessageKey:     "tag",
+		NameKey:        "zlog",
+		StacktraceKey:  "stack",
 		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
+		EncodeLevel:    zapcore.CapitalLevelEncoder,
 		EncodeTime:     zapcore.ISO8601TimeEncoder,
 		EncodeDuration: zapcore.StringDurationEncoder,
 		EncodeCaller:   zapcore.ShortCallerEncoder,
@@ -127,9 +128,9 @@ func InitZlog(cfgFile string) {
 
 	caller := zap.AddCaller()
 	// development := zap.Development()
-	filed := zap.Fields(zap.String("serviceName", zapConfig.ServiceName))
+	field := zap.Fields(zap.String("G_SERV_NAME", zapConfig.ServiceName))
 	callStep := zap.AddCallerSkip(1)
-	logger := zap.New(zapcore.NewTee(infoCore, errorCore), caller, callStep, filed)
+	logger := zap.New(zapcore.NewTee(infoCore, errorCore), caller, callStep, field)
 	Zlogger = logger
 	Sugar = logger.Sugar()
 }
@@ -138,21 +139,21 @@ func __initConfig(cfg string) *ZlogConfig {
 	config := new(ZlogConfig)
 	yamlConfFile, err := ioutil.ReadFile(cfg)
 	if err != nil {
-		fmt.Println("init zlog_config file failed;", err)
 		panic("read zlog config failed")
 	}
 	err = yaml.Unmarshal(yamlConfFile, config)
 	if err != nil {
-		fmt.Println("failed to decode yaml zlog config")
 		panic("unmarshal yaml zlog config failed")
 	}
+	config.LumberConfig.Filename = fmt.Sprintf("%s/%s", config.LumberConfig.FilePath, config.LumberConfig.Filename)
+	config.LumberConfig.WarnFilename = fmt.Sprintf("%s/%s", config.LumberConfig.FilePath, config.LumberConfig.WarnFilename)
 	__initLogDir(config.LumberConfig.FilePath, config.LumberConfig.Filename, config.LumberConfig.WarnFilename)
 	return config
 }
 
 func __initLogDir(path string, notice string, warn string) {
 	if !__isExist(path) {
-		err := os.MkdirAll(path, os.ModePerm)
+		err := os.MkdirAll(path, 0777)
 		if err != nil {
 			panic("create log directory failed")
 		}

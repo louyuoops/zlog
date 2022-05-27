@@ -1,0 +1,11 @@
+LumerConfig:
+    FilePath: "./logs"
+    Filename: "sticker.access"
+    WarnFilename: "sticker.warn"
+    MaxSize: 500
+    MaxBackups: 24
+    MaxAge: 7
+    Compress: true
+
+ZapConfig:
+    ServiceName: "sticker"

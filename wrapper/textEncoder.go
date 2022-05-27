@@ -10,12 +10,21 @@ import (
 	"unicode/utf8"
 
 	"go.uber.org/zap/buffer"
-	"go.uber.org/zap/internal/bufferpool"
 	"go.uber.org/zap/zapcore"
+)
+
+var (
+	bufferpool = buffer.NewPool()
 )
 
 // For JSON-escaping; see textEncoder.safeAddString below.
 const _hex = "0123456789abcdef"
+
+var (
+	_pool = buffer.NewPool()
+	// Get retrieves a buffer from the pool, creating one if necessary.
+	Get = _pool.Get
+)
 
 var _textPool = sync.Pool{New: func() interface{} {
 	return &textEncoder{}
@@ -189,6 +198,13 @@ func (enc *textEncoder) OpenNamespace(key string) {
 }
 
 func (enc *textEncoder) AddString(key, val string) {
+	if key == "G_SERV_NAME" {
+		enc.buf.AppendByte('[')
+		enc.buf.AppendString("G_SERV_NAME:")
+		enc.buf.AppendString(val)
+		enc.buf.AppendByte(']')
+		return
+	}
 	enc.addKey(key)
 	enc.AppendString(val)
 }
@@ -232,9 +248,9 @@ func (enc *textEncoder) AppendBool(val bool) {
 
 func (enc *textEncoder) AppendByteString(val []byte) {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 	enc.safeAddByteString(val)
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 }
 
 // appendComplex appends the encoded form of the provided complex128 value.
@@ -287,16 +303,16 @@ func (enc *textEncoder) AppendReflected(val interface{}) error {
 
 func (enc *textEncoder) AppendString(val string) {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 	enc.safeAddString(val)
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 }
 
 func (enc *textEncoder) AppendTimeLayout(time time.Time, layout string) {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 	enc.buf.AppendTime(time, layout)
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 }
 
 func (enc *textEncoder) AppendTime(val time.Time) {
@@ -362,69 +378,52 @@ func addFields(enc zapcore.ObjectEncoder, fields []zapcore.Field) {
 
 func (enc *textEncoder) EncodeEntry(ent zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	final := enc.clone()
-	final.buf.AppendByte('{')
 
-	if final.LevelKey != "" && final.EncodeLevel != nil {
-		final.addKey(final.LevelKey)
-		cur := final.buf.Len()
+	// level header
+	if final.EncodeLevel != nil {
+		final.buf.AppendByte('[')
 		final.EncodeLevel(ent.Level, final)
-		if cur == final.buf.Len() {
-			// User-supplied EncodeLevel was a no-op. Fall back to strings to keep
-			// output JSON valid.
-			final.AppendString(ent.Level.String())
-		}
+		final.buf.AppendByte(']')
 	}
-	if final.TimeKey != "" {
-		final.AddTime(final.TimeKey, ent.Time)
-	}
-	if ent.LoggerName != "" && final.NameKey != "" {
-		final.addKey(final.NameKey)
-		cur := final.buf.Len()
-		nameEncoder := final.EncodeName
 
-		// if no name encoder provided, fall back to FullNameEncoder for backwards
-		// compatibility
-		if nameEncoder == nil {
-			nameEncoder = zapcore.FullNameEncoder
-		}
+	// time part
+	final.buf.AppendByte('[')
+	final.AppendTime(ent.Time)
+	// final.AddTime(final.TimeKey, ent.Time)
+	final.buf.AppendByte(']')
 
-		nameEncoder(ent.LoggerName, final)
-		if cur == final.buf.Len() {
-			// User-supplied EncodeName was a no-op. Fall back to strings to
-			// keep output JSON valid.
-			final.AppendString(ent.LoggerName)
-		}
-	}
-	if ent.Caller.Defined {
-		if final.CallerKey != "" {
-			final.addKey(final.CallerKey)
-			cur := final.buf.Len()
-			final.EncodeCaller(ent.Caller, final)
-			if cur == final.buf.Len() {
-				// User-supplied EncodeCaller was a no-op. Fall back to strings to
-				// keep output JSON valid.
-				final.AppendString(ent.Caller.String())
-			}
-		}
-		if final.FunctionKey != "" {
-			final.addKey(final.FunctionKey)
-			final.AppendString(ent.Caller.Function)
-		}
-	}
-	if final.MessageKey != "" {
-		final.addKey(enc.MessageKey)
-		final.AppendString(ent.Message)
-	}
+	// service part
+	// parse bytes to string for processing
 	if enc.buf.Len() > 0 {
 		final.addElementSeparator()
 		final.buf.Write(enc.buf.Bytes())
 	}
+
+	if ent.Caller.Defined {
+		// final.addKey(final.CallerKey)
+		final.buf.AppendByte('[')
+		cur := final.buf.Len()
+		final.EncodeCaller(ent.Caller, final)
+		if cur == final.buf.Len() {
+			// User-supplied EncodeCaller was a no-op. Fall back to strings to
+			// keep output JSON valid.
+			final.AppendString(ent.Caller.String())
+		}
+		final.buf.AppendByte(' ')
+		final.buf.AppendString(ent.Caller.Function)
+		final.buf.AppendByte(']')
+	}
+	final.buf.AppendByte(' ')
+
+	if final.MessageKey != "" {
+		final.addKey(enc.MessageKey)
+		final.AppendString(ent.Message)
+	}
+
 	addFields(final, fields)
-	final.closeOpenNamespaces()
 	if ent.Stack != "" && final.StacktraceKey != "" {
 		final.AddString(final.StacktraceKey, ent.Stack)
 	}
-	final.buf.AppendByte('}')
 	final.buf.AppendString(final.LineEnding)
 
 	ret := final.buf
@@ -445,10 +444,10 @@ func (enc *textEncoder) closeOpenNamespaces() {
 
 func (enc *textEncoder) addKey(key string) {
 	enc.addElementSeparator()
-	enc.buf.AppendByte('"')
+	// enc.buf.AppendByte('"')
 	enc.safeAddString(key)
-	enc.buf.AppendByte('"')
-	enc.buf.AppendByte(':')
+	// enc.buf.AppendByte('"')
+	enc.buf.AppendByte('=')
 	if enc.spaced {
 		enc.buf.AppendByte(' ')
 	}
@@ -460,10 +459,11 @@ func (enc *textEncoder) addElementSeparator() {
 		return
 	}
 	switch enc.buf.Bytes()[last] {
-	case '{', '[', ':', ',', ' ':
+	case '{', '[', '=', ',', ' ', ']':
 		return
 	default:
-		enc.buf.AppendByte(',')
+		enc.buf.AppendByte('|')
+		enc.buf.AppendByte('|')
 		if enc.spaced {
 			enc.buf.AppendByte(' ')
 		}
