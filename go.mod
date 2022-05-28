@@ -1,4 +1,4 @@
-module gitee.com/lrtxpra/zlog
+module github.com/lrtxpra/zlog
 
 go 1.18
 

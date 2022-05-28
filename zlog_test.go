@@ -3,7 +3,7 @@ package gotest
 import (
 	"testing"
 
-	zlog "gitee.com/lrtxpra/zlog/wrapper"
+	zlog "github.com/lrtxpra/zlog/wrapper"
 	"go.uber.org/zap"
 )
 
